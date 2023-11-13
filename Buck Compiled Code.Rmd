@@ -1,0 +1,1306 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+install.packages(c("tidyverse", "here", "rstatix", "palmerpenguins", "visdat", "janitor", "plotly", "IRdisplay"))
+```
+
+```{r}
+library(visdat)
+library(janitor)
+library(tidyverse)
+library(rstatix)
+library(plotly)
+library(IRdisplay)
+library(here)
+```
+
+```{r}
+gene_expression <- read_tsv(here("data","Buck_assessment_data-3","cancer_gene_expression_Buck.tsv"))
+gene_expression
+hallmarks <- read_tsv(here("data","Buck_assessment_data-3","cancer_hallmarks_Buck.tsv"))
+hallmarks
+mutation <- read_tsv(here("data","Buck_assessment_data-3","cancer_mutations_Buck.tsv"))
+mutation
+r_mutation <- read_tsv(here("data","Buck_assessment_data-3","cancer_resistance_mutations_Buck.tsv"))
+r_mutation
+samples <- read_tsv(here("data","Buck_assessment_data-3","cancer_samples_Buck.tsv"))
+samples
+```
+
+```{r}
+gene_expression <- gene_expression %>%
+  clean_names(case = "title")
+gene_expression
+
+hallmarks <- hallmarks %>%
+  clean_names(case = "title")
+hallmarks
+
+mutation <- mutation %>%
+  clean_names(case = "title")
+mutation
+
+r_mutation <- r_mutation %>%
+  clean_names(case = "title")
+r_mutation
+
+samples <- samples %>%
+  clean_names(case = "title")
+samples
+```
+
+*Cancer Gene Expression Overview*
+
+>Sample id,Sample name
+
+A sample is an instance of a portion of a tumour being examined for mutations. The sample name can be derived from a number of sources. In many cases it originates from the cell line name. Other sources include names assigned by the annotators, or an incremented number assigned during an anonymisation process. A number of samples can be taken from a single tumour and a number of tumours can be obtained from one individual. A sample id is used to identify a sample within the COSMIC database. There can be multiple ids, if the same sample has been entered into the database multiple times from different papers. These samples are from the ICGC and TCGA.
+
+> Gene name
+
+The gene name for which the data has been curated in COSMIC. In most cases this is the accepted HGNC identifier.
+
+> Regulation 
+
+it could be over or under depending on the scores from different platforms if they are above or below the threshold.
+
+> Id Study
+
+Lists the unique Ids of studies that have involved this gene expression data.
+
+> Z Score
+
+serves as an indicative score taken from the gene_expression from different platforms in order of preference: IlluminaHiSeq_RNASeqV2, IlluminaGA_RNASeqV2, AgilentG4502A_07_3.
+
+
+```{r}
+glimpse(gene_expression)
+```
+
+```{r}
+gene_expression %>%
+  filter(`Z Score` > 1.999) %>%
+  arrange(`Z Score`)
+#z_score Values between *-2.000 and 2.000* result in normal regulation of the given gene.
+```
+
+```{r}
+gene_expression %>%
+  arrange(`Gene Name`)
+```
+*Cancer Gene Expression Analysis*
+
+```{r}
+a <- gene_expression %>%
+  count(Regulation, sort = TRUE) %>%
+  mutate(props = prop.table(n))
+
+a
+
+a %>%
+  ggplot() + aes(x = Regulation, y = n, fill = Regulation) + geom_col() + labs(title = "Total Frequency of Gene Regulation") + ylab("Frequency")
+
+ggsave(here("output/Gene Regulation.jpeg"), width = 10, height = 7)
+
+blank_theme <- theme_minimal()+
+  theme(axis.title.x = element_blank(), axis.title.y = element_blank(), panel.border = element_blank(), panel.grid=element_blank(),
+        axis.ticks = element_blank(), plot.title=element_text(size=14, face="bold")) 
+
+a %>%
+  ggplot() + aes(x = "", y = props, fill = Regulation) + geom_col(colour = "black") +
+  coord_polar("y", start = 0) + 
+   blank_theme +
+  theme(axis.text.x = element_blank()) +
+  geom_text(aes(label = paste0(round(props*100), "%")),
+            position = position_stack(vjust = 0.5)) +
+  labs(title = "Regulation frequency of different gene mutations")
+
+# Pie Charts made using code from the following sources:  https://www.youtube.com/watch?v=bzRD_nvvIVI, http://www.sthda.com/english/wiki/ggplot2-pie-chart-quick-start-guide-r-software-and-data-visualization#customized-pie-charts 
+
+ggsave(here("output/Gene_Regulation_pie_chart.jpeg"), width = 10, height = 7)
+
+# 93.9% of the genes has normal gene regulation
+# 5.39% of the genes is over-expressed
+# 0.68% of the genes is under-expressed
+```
+
+> What does z_score mean?
+
+Standard score (Z-score) for gene expression determines if the gene regulation is normal, over- or under-expressed. 
+Normal gene regulation has a Z-score of -2 to 2.
+Over-expressed gene regulation has a Z-score of > 2.
+Under-expressed gene regulation has a Z-score of < -2.
+
+> What is sample_id and sample_name?
+
+A sample is an instance of a portion of a tumour being examined for mutations. 
+The sample name can be derived from a number of sources. In many cases it originates from the cell line name. Other sources include names assigned by the annotators, or an incremented number assigned during an anonymisation process. A number of samples can be taken from a single tumour and a number of tumours can be obtained from one individual. 
+A sample id is used to identify a sample within the COSMIC database. There can be multiple ids, if the same sample has been entered into the database multiple times from different papers. These samples are from the ICGC and TCGA.
+
+```{r}
+gene_expression %>%
+  filter(`Z Score` <= 50, `Z Score` >= -50) %>%
+  arrange(`Z Score`)
+
+#remove everything +- 50
+```
+
+> Why is z_score of GAGE1, MSMB, VSTM2B and NNAT genes so much higher than the z_score of the rest of the genes?  In what cancers are these genes over-expressed?
+
+```{r}
+# Mean and standard deviations of z-scores for over-expressed genes
+gene_expression %>%
+  filter(`Z Score` > 2) %>%
+  arrange(`Z Score`) %>%
+	summarise(across(.cols = c(`Z Score`), list(average = ~mean(.x, na.rm = TRUE), stdev = ~sd(.x, na.rm = TRUE))))
+
+# Mean and standard deviations of z-scores for normally regulated genes
+gene_expression %>%
+  select(Regulation, `Z Score`) %>%
+  filter(Regulation == "normal") %>%
+  summarise(across(.cols = c(`Z Score`), list(average = ~mean(.x, na.rm = TRUE), stdev = ~sd(.x, na.rm = TRUE))))
+
+# Mean and standard deviations of z-scores for under-expressed genes
+gene_expression %>%
+  select(Regulation, `Z Score`) %>%
+  filter(Regulation == "under") %>%
+  summarise(across(.cols = c(`Z Score`), list(average = ~mean(.x, na.rm = TRUE), stdev = ~sd(.x, na.rm = TRUE))))
+```
+
+*FATHMM Score and FATHMM Prediction*
+
+> FATHMM Prediction
+
+Neutral = defined as a passenger or tolerated
+Pathogenic = defined as a cancer or damaging
+
+> FATHMM Score
+
+is in the form of p values ranging from 0 to 1. P values > 0.5 are pathogenic, whereas p values < 0.5 are benign. P values close to 0 or 1 are high confidence results which are more accurate.
+
+```{r}
+FATHMM_Boxplot <- inner_join(gene_expression, mutation, by = "Gene Name") %>%
+  select(`Gene Name`, `Primary Histology`, `Fathmm Prediction`, `Fathmm Score`) %>%
+  filter(`Gene Name` %in% c("MTOR", "KDM5C", "RB1", "NSD1", "TP53", "EGFR", "KMT2C", "FAT3", "NOTCH1", "FBXW7", "ATR", "LRIG3", "GRIN2A"), `Fathmm Prediction` == "PATHOGENIC", `Primary Histology` %in% c("carcinoma", "malignant_melanoma", "glioma", "lymphoid_neoplasm")) %>%
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology`== "carcinoma" ~ "Carcinoma",
+    `Primary Histology`== "glioma" ~ "Glioma",
+    `Primary Histology`== "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology`== "malignant_melanoma" ~ "Malignant Melanoma")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = `Fathmm Score`, colour = `Gene Name`) + geom_boxplot() +
+  labs(title = "Boxplot of FATHMM Scores of most commonly over- and under-expressed genes") +
+  theme(plot.title = element_text(size = rel(1))) +
+  xlab("Primary Histology") + ylab("FATHMM Score") + labs(subtitle = "Top 4 most common Primary Histologies")
+
+FATHMM_Boxplot
+
+ggsave(here("output/FATHMM_Score_boxplot.jpeg"), width = 10, height = 7)
+```
+```{r}
+# FATHMM Prediction 
+mutation %>% 
+  arrange(desc(`Gene Cds Length`)) %>% 
+  select(`Gene Name`, `Gene Cds Length`) %>% 
+  distinct()
+
+mutation %>% 
+  filter(`Gene Name` %in% c("ABL1", "EGFR", "MET", "MTOR", "NFR", "ROS1")) %>% 
+  ggplot() + aes(x = `Fathmm Score`, y = `Gene Cds Length`, colour = `Gene Name`) + geom_point() +facet_wrap(~`Fathmm Prediction`)
+
+
+mutation %>% 
+  select(`Gene Name`, `Gene Cds Length`, `Fathmm Prediction`, `Fathmm Score`) %>% 
+  arrange(desc(`Gene Cds Length`)) %>% 
+  ggplot() + aes(x = `Fathmm Score`, y = `Gene Cds Length`, colour = `Fathmm Prediction`) + geom_point() +
+  labs(title = "Correlation between Gene Length and Fathmm Score")
+
+ggsave(here("output/FATHMM_Score_and_gene_length.jpeg"), width = 10, height = 7)
+```
+
+
+*Overexpressed Genes*
+
+What does the higher z-score in over-expressed genes mean? 
+> Higher z-scores are outliers in the data.
+
+```{r}
+gene_expression %>%
+  select(`Gene Name`, Regulation, `Z Score`) %>%
+  filter(Regulation == "over") %>%
+  ggplot() + aes(x = `Gene Name`, y = `Z Score`) + geom_point() + theme(axis.text.x = element_text(angle=90, hjust=1, size = 1)) + labs(title = "Over Expressed genes and their respective Z scores")
+
+ggsave(here("output/overexpressed_genes_and_zscore.jpeg"), width = 10, height = 7)
+
+gene_expression %>%
+  select(`Gene Name`, `Regulation`, `Z Score`) %>%
+  filter(Regulation == "over", `Z Score` > 58) %>%
+  ggplot() + aes(x = `Gene Name`, y = `Z Score`) + geom_point() + theme(axis.text.x = element_text(angle=90, hjust=1)) + labs(title = "Genes with incredibly high Z scores") + labs(subtitle = "(Z Score > 58)")
+
+ggsave(here("output/overexpressed_incredibly_high_zscores.jpeg"), width = 10, height = 7)
+# theme part of the code is from stackoverflow MCH member (https://stackoverflow.com/questions/1828742/rotating-axis-labels-in-r)
+```
+
+```{r}
+# Top 20 over-expressed genes in X cancer
+overexpressed <- inner_join(gene_expression, mutation, by = "Gene Name") %>%
+  select(`Gene Name`, Regulation, `Z Score`, `Primary Site`, `Primary Histology`, `Histology Subtype 1`, `Fathmm Prediction`, `Fathmm Score`, Age,) %>%
+  filter(Regulation == "over", `Fathmm Prediction` == "PATHOGENIC") %>%
+  arrange(desc(`Fathmm Score`))
+overexpressed
+```
+
+```{r}
+# Count of over-expressed genes
+overexpressed %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n))
+
+overexpressed %>%
+  count(`Gene Name`) %>%
+  filter(n > 10) %>%
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = `Gene Name`, y = n, fill = `Gene Name`) + geom_col() + ylab("Frequency") + labs(title = " Frequency of Overexpressed Genes") + labs(subtitle = "Top 10 most common")
+
+ggsave(here("output/overexpressed_genes_frequency_top_10.jpeg"), width = 10, height = 7)
+
+# Count of primary histologies of the most frequent over-expressed gene
+overexpressed %>%
+  filter(`Gene Name` == "TP53") %>%
+  count(`Primary Histology`) %>%
+  arrange(desc(n)) %>% 
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "adnexal_tumour" ~ "Adnexal Tumour",
+    `Primary Histology` == "adnexal_cortical_neoplasm" ~ "Adnexal Cortical Neoplasm",
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "germ_cell_tumour" ~ "Germ Cell Tumour",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Primary Histology` == "leiomyosarcoma" ~ "Leiomyosarcoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma",
+    `Primary Histology` == "osteosarcoma" ~ "Osteosarcoma",
+    `Primary Histology` == "other" ~ "Other", 
+    `Primary Histology` == "thymoma" ~ "Thymoma",
+    `Primary Histology` == "Wilms_tumour" ~ "Wilms Tumour")) %>%
+  drop_na(`Primary Histology`)
+
+overexpressed %>%
+  filter(`Gene Name` == "TP53") %>%
+  count(`Primary Histology`) %>%
+  arrange(desc(n)) %>%
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "adnexal_tumour" ~ "Adnexal Tumour",
+    `Primary Histology` == "adnexal_cortical_neoplasm" ~ "Adnexal Cortical Neoplasm",
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "germ_cell_tumour" ~ "Germ Cell Tumour",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Primary Histology` == "leiomyosarcoma" ~ "Leiomyosarcoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma",
+    `Primary Histology` == "osteosarcoma" ~ "Osteosarcoma",
+    `Primary Histology` == "other" ~ "Other", 
+    `Primary Histology` == "thymoma" ~ "Thymoma",
+    `Primary Histology` == "Wilms_tumour" ~ "Wilms Tumour")) %>%
+  drop_na(`Primary Histology`) %>%
+  ggplot() + aes(x = `Primary Histology`, y = n, fill = `Primary Histology`) + geom_col() + ylab("Frequency") + labs(title = " Frequency of different Primary histologies") + labs(subtitle = "TP53 Gene") + theme(axis.text.x = element_text(angle = 90))
+
+ggsave(here("output/overexpressed_TP53_primary_histologies_frequency.jpeg"), width = 10, height = 7)
+
+# Count of primary histologies
+overexpressed %>%
+  count(`Primary Histology`) %>%
+  arrange(desc(n))
+  
+overexpressed %>%
+  count(`Primary Histology`) %>%
+  filter(n > 8) %>%
+  arrange(desc(n)) %>%
+   mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = n, fill = `Primary Histology`) + geom_col() + ylab("Frequency") + labs(title = "Frequency of Primary Histologies observed in Overexpressed genes")
+
+ggsave(here("output/overexpressed_frequency_primary_histologies.jpeg"), width = 10, height = 7)
+# Top 4 used as others have insignificant counts (<8) compared with the top 4, effectively zero in comparison?
+
+# Count of genes over-expressed in the most frequent primary histology
+overexpressed %>%
+  filter(`Primary Histology` == "carcinoma") %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n)) 
+
+overexpressed %>%
+  filter(`Primary Histology` == "carcinoma") %>%
+  count(`Gene Name`) %>%
+  filter(n > 7) %>%
+  arrange(desc(n))  %>%
+  ggplot() + aes(x = `Gene Name`, y = n, fill = `Gene Name`) + geom_col() + ylab("Frequency") + labs(title = "Frequency of Gene mutations with a primary histology of Carcinoma")
+
+ggsave(here("output/overexpressed_gene_mutation_frequency_carcinoma.jpeg"), width = 10, height = 7)
+```
+
+Top 10 Gene mutations resulting in the Carcinoma Histology
+
+> The TP53 gene 
+
+is responsible for coding tumor protein p53 which acts as a tumor suppressor. Mutations in this gene are the most common and determine how well or how poorly cell division is regulated.
+
+> The EGFR gene
+
+codes for a receptor protein for the epidural growth factor family. It is found on the cell surface and binds to the growth factor which leads to cell proliferation.Somatic mutations in the gene ocur in a type of lung cancer cell that forms an adenocarcinoma which is most common in people who have never smoked.
+
+> The KMT2C gene 
+
+is a protein coding gene that has the most frequently mutated genes in breast cancer with a frequency of about 8% in TCGA breast cancer samples.
+
+> The NOTCH1 gene 
+
+codes for a receptor protein which have specific sites for complimentary ligands. It is the cause of most head and neck squamous cell carcinomas at 15% found in the moist lining of the mouth, nose and throat.
+
+> The ATR gene
+
+is a protein coding gene responsible for cellular response to heat stress and the cell cycle. It has a major role as a sensor of replication of stress which is increased in a cancer patient. It is mainly found in colorectal, breast, and endometrial cancers.
+
+> The SMARCA4 gene 
+
+produces part of a protein group that regulates gene expression (known as chromatin remodeling). This gene is most associated with non-small cell lung cancer and malignant rhabdoid tumours.
+
+> The FAT3 gene
+
+can cause pancreatic tumor after a point mutation. It is also a key gene in multiple tumors including; ovarian cancer, breast cancer, lung adenocarcinoma.
+
+> The FBXW7 gene
+
+is a critical tumor supressor however when mutated it is associated with colon cancer.
+
+> The LRIG3 gene
+
+plays a role in craniofacial and inner ear morphegenesis during embryonic development. When overexpressed it plays a role in prostate cancer through the suppression of cell incasion and migration.
+
+> The NCOR2 gene
+
+is a coactivator and corepressor for oestrogen receptor-alpha. A reduction in the amount of NCOR2 protein reduces oestradiiol-induced progresion through G1/S phase in ER+ breast cancer. 
+
+
+```{r}
+overexpressed %>%
+  filter(`Primary Histology` %in% c("carcinoma", "glioma", "lymphoid_neoplasm", "malignant_melanoma"), `Gene Name` %in% c("ABL1", "EGFR", "MET", "MTOR", "NF2", "ROS1")) %>%
+  count(`Primary Histology`, `Gene Name`) %>% 
+  arrange(desc(n))
+
+overexpressed %>%
+  filter(`Primary Histology` %in% c("carcinoma", "glioma", "lymphoid_neoplasm", "malignant_melanoma"), `Gene Name` %in% c("ABL1", "EGFR", "MET", "MTOR", "NF2", "ROS1")) %>%
+  count(`Primary Histology`, `Gene Name`) %>% 
+  arrange(desc(n)) %>% 
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = n, fill = `Gene Name`) + geom_col(position = "dodge") + ylab("Frequency") + labs(title = "Frequency of top Primary Histologies in the top 4 most frequently overexpressed genes")
+
+ggsave(here("output/overexpressed_top_primary_histologies_4_most_frequently_overexpressed_genes.jpeg"), width = 10, height = 7)
+```
+*Underexpressed Genes in cancer*
+
+```{r}
+# Top under-expressed genes in cancer
+underexpressed <- inner_join(gene_expression, mutation, by = "Gene Name") %>%
+  select(`Gene Name`, Regulation, `Z Score`, `Primary Site`, `Primary Histology`, `Histology Subtype 1`, `Fathmm Prediction`, `Fathmm Score`, Age) %>%
+  filter(Regulation == "under", `Fathmm Prediction` == "PATHOGENIC") %>%
+  arrange(desc(`Fathmm Score`))
+underexpressed 
+
+gene_expression %>%
+  select(`Gene Name`, Regulation, `Z Score`) %>%
+  filter(Regulation == "under") %>%
+  ggplot() + aes(x = `Gene Name`, y = `Z Score`) + geom_point() + theme(axis.text.x = element_text(angle=90, hjust=1, size = 1)) + labs(title = "Under Expressed genes and their respective Z scores")
+
+ggsave(here("output/underexpressed_genes_and_zscores.jpeg"), width = 10, height = 7)
+```
+
+```{r}
+# Count of under-expressed genes
+underexpressed %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n))
+
+underexpressed %>%
+  filter(`Gene Name` %in% c("MTOR", "RB1", "KDM5C", "NSD1", "FANCC", "SETD2", "EWSR1", "SETD1B", "SHTN1", "ABL1")) %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = `Gene Name`, y = n, fill = `Gene Name`) + geom_col() + ylab("Frequency") + labs(title = " Frequency of Underexpressed Genes") + labs(subtitle = "Top 10 most common")
+
+ggsave(here("output/underexpressed_frequency_of_gene_mutations_top_10_.jpeg"), width = 10, height = 7)
+
+# Count of primary histologies
+underexpressed %>%
+  count(`Primary Histology`) %>%
+  arrange(desc(n))
+
+underexpressed %>%
+  count(`Primary Histology`) %>%
+  arrange(desc(n)) %>%
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma",
+    `Primary Histology` == "osteosarcoma" ~ "Osteosarcoma",
+    `Primary Histology` == "other" ~ "Other")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = n, fill = `Primary Histology`) + geom_col() + ylab("Frequency") + labs(title = "Frequency of Primary Histologies observed in Underexpressed genes") + theme(axis.text.x = element_text(angle = 90))
+
+ggsave(here("output/unerexpressed_primary_histologies_frequency.jpeg"), width = 10, height = 7)
+
+#This table shows the most under expressed gene is MTOR.
+
+#Count of primary histologies of the most frequent under-expressed gene
+underexpressed %>%
+  filter(`Gene Name` == "MTOR") %>%
+  count(`Primary Histology`) %>%
+  arrange(desc(n))
+
+underexpressed %>%
+  filter(`Gene Name` == "MTOR") %>%
+  count(`Primary Histology`) %>%
+  arrange(desc(n)) %>%
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma",
+    `Primary Histology` == "other" ~ "Other")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = n, fill = `Primary Histology`) + geom_col() + ylab("Frequency") + labs(title = "Frequency of Primary Histologies in the MTOR Gene")
+
+ggsave(here("output/underexpressed_MTOR_primary_histologies_frequency.jpeg"), width = 10, height = 7)
+
+# Count of genes under-expressed in the most frequent primary histology
+underexpressed %>%
+  filter(`Primary Histology` == "carcinoma") %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n)) 
+
+underexpressed %>%
+  filter(`Primary Histology` == "carcinoma") %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = `Gene Name`, y = n, fill = `Gene Name`) + geom_col() + ylab("Frequency") + labs(title = "Frequency of Carcinoma in Gene Mutations resulting in underexpression") + theme(axis.text.x = element_text(angle = 90))
+
+ggsave(here("output/underexpressed_gene_mutations_frequency_carcinoma.jpeg"), width = 10, height = 7)
+```
+
+Top 10 Underexpressed Genes
+
+> MTOR Gene
+
+is involved in protein production as well as the cell's life cycle. Under expression of this gene would negatively impact a cell's survival.
+
+> RB1 Gene
+
+helps code for a protein involved in tumor suppression, therefore under expression of this would prevent tumour suppression and promote malignant tumour growth.
+
+> KDM5C Gene
+
+involved in DNA transcription, under expression could result in issues with DNA synthesis
+
+> NSD1 Gene 
+
+has the role of coding for histone methyltransferases which have the role of altering histones. This gene being unexpressed would result in non-functional enzymes
+
+> FANCC Gene 
+
+codes for a protein involved in the FA pathway which is involved in DNA repair pathways. underexpression would mean potential damage to DNA.
+
+> SETD2 Gene 
+
+acts as a tumour suppressor gene.
+
+> EWSR1 Gene
+
+encodes proteins involved in gene expression, RNA processes as well as cellular processes, under expression would result in disruptions to these processes.
+
+> SETD1B Gene
+
+encodes for a protein involved with the enzyme histone methyltransferase.
+
+> SHTN1 Gene 
+
+codes for a protein named Shootin-1, which plays a role in the correct function of neurons. When under expressed, neurons will not function as they should.
+
+> ABL1 Gene
+
+encodes for a protein which acts as a kinase, an enzyme which is involved in phosphorylation, under expression negatively impacts a large range of cellular processes
+
+---
+
+The only link between gene and primary histology is that the majority of the underexpressed genes have a primary histology of carcinoma. However, this is due to carcinoma being the most common type of cancer because it originates on epithelial tissue which is renewed at a much quicker rate than other tissue. Some genes have just one primary histology, such as ABL1 only having carcinoma as its primary histology. ABL1 is a protooncogene, therefore mutation of this gene would lead to the promotion of cancer.
+
+---
+
+> References
+
+Murugan A. K. (2019). mTOR: Role in cancer, metastasis and drug resistance. Seminars in cancer biology, 59, 92–111. https://doi.org/10.1016/j.semcancer.2019.07.003
+
+Dyson N. J. (2016). RB1: a prototype tumor suppressor and an enigma. Genes & development, 30(13), 1492–1502. https://doi.org/10.1101/gad.282145.116
+
+Chang, S., Yim, S., & Park, H. (2019). The cancer driver genes IDH1/2, JARID1C/ KDM5C, and UTX/ KDM6A: crosstalk between histone demethylation and hypoxic reprogramming in cancer metabolism. Experimental & molecular medicine, 51(6), 1–17. https://doi.org/10.1038/s12276-019-0230-6
+
+Huang, H., Howard, C. A., Zari, S., Cho, H. J., Shukla, S., Li, H., Ndoj, J., González-Alonso, P., Nikolaidis, C., Abbott, J., Rogawski, D. S., Potopnyk, M. A., Kempinska, K., Miao, H., Purohit, T., Henderson, A., Mapp, A., Sulis, M. L., Ferrando, A., Grembecka, J., … Cierpicki, T. (2020). Covalent inhibition of NSD1 histone methyltransferase. Nature chemical biology, 16(12), 1403–1410. https://doi.org/10.1038/s41589-020-0626-6
+
+Huang, F., Ben Aissa, M., Lévesque, G., & Carreau, M. (2018). FANCC localizes with UNC5A at neurite outgrowth and promotes neuritogenesis. BMC research notes, 11(1), 662. https://doi.org/10.1186/s13104-018-3763-1
+
+Niu, N., Lu, P., Yang, Y., He, R., Zhang, L., Shi, J., Wu, J., Yang, M., Zhang, Z. G., Wang, L. W., Gao, W. Q., Habtezion, A., Xiao, G. G., Sun, Y., Li, L., & Xue, J. (2020). Loss of Setd2 promotes Kras-induced acinar-to-ductal metaplasia and epithelia-mesenchymal transition during pancreatic carcinogenesis. Gut, 69(4), 715–726. https://doi.org/10.1136/gutjnl-2019-318362
+
+Lee, J., Nguyen, P. T., Shim, H. S., Hyeon, S. J., Im, H., Choi, M. H., Chung, S., Kowall, N. W., Lee, S. B., & Ryu, H. (2019). EWSR1, a multifunctional protein, regulates cellular function and aging via genetic and epigenetic pathways. Biochimica et biophysica acta. Molecular basis of disease, 1865(7), 1938–1945. https://doi.org/10.1016/j.bbadis.2018.10.042
+
+Kranz, A., & Anastassiadis, K. (2020). The role of SETD1A and SETD1B in development and disease. Biochimica et biophysica acta. Gene regulatory mechanisms, 1863(8), 194578. https://doi.org/10.1016/j.bbagrm.2020.194578
+
+Ergin, V., & Zheng, S. (2020). Putative Coiled-Coil Domain-Dependent Autoinhibition and Alternative Splicing Determine SHTN1's Actin-Binding Activity. Journal of molecular biology, 432(14), 4154–4166. https://doi.org/10.1016/j.jmb.2020.04.025
+
+Jain, S., & Abraham, A. (2020). BCR-ABL1-like B-Acute Lymphoblastic Leukemia/Lymphoma: A Comprehensive Review. Archives of pathology & laboratory medicine, 144(2), 150–155. https://doi.org/10.5858/arpa.2019-0194-RA
+
+```{r}
+underexpressed %>%
+  filter(`Primary Histology` %in% c("carcinoma", "glioma", "lymphoid_neoplasm", "malignant_melanoma"), `Gene Name` %in% c("RB1", "NSD1", "FANCC", "MTOR")) %>%
+  count(`Primary Histology`, `Gene Name`) %>% 
+  arrange(desc(n))
+
+underexpressed %>%
+  filter(`Primary Histology` %in% c("carcinoma", "glioma", "lymphoid_neoplasm", "malignant_melanoma"), `Gene Name` %in% c("RB1", "NSD1", "FANCC", "MTOR")) %>%
+  count(`Primary Histology`, `Gene Name`) %>% 
+  arrange(desc(n)) %>% 
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = n, fill = `Gene Name`) + geom_col(position = "dodge") + ylab("Frequency") + labs(title = "Frequency of Gene Mutations in Top 3 Primary Histologies") 
+
+ggsave(here("output/underexpressed_gene_mutation_frequency_top_histologies.jpeg"), width = 10, height = 7)
+```
+
+> How many times are the top underexpressed genes present on the top primary histologies?
+
+```{r}
+ underexpressed %>%
+  filter(`Primary Histology` != "other") %>% 
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma",
+    `Primary Histology` == "osteosarcoma" ~ "Osteosarcoma")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = `Gene Name`) + geom_point() + theme(axis.text.x = element_text(angle = 90)) + labs(title = "Different Gene Mutations present in Top Primary Histologies")
+
+ggsave(here("output/underexpression_different_gene_mutations_in_top_ph.jpeg"), width = 10, height = 7)
+
+underexpressed %>%
+  filter(`Primary Histology` != "other") %>% 
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "malignant_melanoma" ~ "Malignant Melanoma",
+    `Primary Histology` == "osteosarcoma" ~ "Osteosarcoma")) %>%
+  ggplot() + aes(x = `Gene Name`, fill = `Primary Histology`) + geom_bar(alpha = 0.5) + theme(axis.text.x = element_text(angle = 90)) + labs(title = "Frequency of Primary Histologies for each Gene Mutation") + ylab("Frequency")
+
+ggsave(here("output/underexpressed_primary_histologies.jpeg"), width = 10, height = 7)
+
+#From these graphs, it can be deduced that there are many different gene mutations which can result in carcinoma. This is because carcinomas are the most common cancer due to them growing from fast dividing cells such as skin cells.
+```
+
+> Is there a link between lymphoid neoplasm and age? Or is the excess of younger people having lymphoid neoplasm just chance from the samples collected?
+
+```{r}
+samples %>%
+  filter(`Primary Histology` == "lymphoid_neoplasm") %>%
+  select(`Primary Histology`, `Age`, `Gender`) %>%
+  mutate(Gender = case_when(
+    Gender == "f" ~ "Female",
+    Gender == "m" ~ "Male",
+    Gender == "u" ~ "Unknown"))
+
+samples %>%
+  filter(`Primary Histology` == "lymphoid_neoplasm") %>%
+  mutate(Gender = case_when(
+    Gender == "f" ~ "Female",
+    Gender == "m" ~ "Male",
+    Gender == "u" ~ "Unknown")) %>%
+  ggplot() + aes(x = Age, fill = Gender) + geom_density(alpha = 0.5) + ylab("Density") + labs(title = "Density plot showing age of Lymphoid Neoplasm diagnosis") + labs(subtitle = "Seperated by Gender")
+
+ggsave(here("output/density_lymphoid_neoplasm.jpeg"), width = 10, height = 7)
+
+#This graph shows that lymphoid neoplasm is more common in younger people, the graph peaks at around 15 years old. Upon research, it is still unknown why it is more common at a younger age, however 1 in 5 young people diagnosed with cancer are diagnosed with lymphoma.
+```
+
+*Does gene length affect gene mutation?*
+
+```{r}
+mutation %>%
+  arrange(`Gene Cds Length`)
+
+mutation %>%
+  ggplot() + aes(x = `Gene Name`, y = `Gene Cds Length`) + geom_point() + labs(title = "Gene Cds Length of each gene")
+
+ggsave(here("output/Cds_length_of_genes.jpeg"), width = 10, height = 7)
+#The graph and table show that the longest length gene is TP53, upon research, there is no link between gene length and their mutations.
+
+mutation %>% 
+cor_test(`Gene Cds Length`, `Fathmm Score`)
+
+#research suggests that longer genes are associated with diseases such as heart disease and cancer (Sahakyan and Balasubramanian,2016). It is also suggested that longer genes are infrequently used past development, and shorter genes are often used in daily functions of the human body such as the immune system
+# The low score of -0.16 in this correlation test indicates that there is a weak negative correlation between gene length and fathmm score , meaning as gene length increases the fathmm score would be lower, meaning they are less likely to be pathogenic, which goes against this theory of longer genes causing cancer.
+```
+
+
+*Primary Site Analysis*
+
+```{r}
+top10_primary_site<- samples %>%
+  distinct() %>%
+  count(`Primary Site`) %>%
+  arrange(desc(n)) %>%
+  select(`Primary Site`) %>%
+  slice(1:10) %>%
+  pull()
+
+samples %>%
+  filter(`Primary Site` %in% top10_primary_site) %>%
+  count(`Primary Site`, Gender) %>%
+   mutate(Gender = case_when(
+    Gender == "f" ~ "Female",
+    Gender == "m" ~ "Male",
+    Gender == "u" ~ "Unknown")) %>%
+    mutate(`Primary Site` = case_when(
+    `Primary Site`== "breast" ~ "Breast",
+    `Primary Site` == "haematopoietic_and_lymphoid_tissue" ~ "Haematopoietic & Lymphoid Tissue",
+    `Primary Site` == "large_intestine" ~ "Large Intestine",
+    `Primary Site` == "ovary" ~ "Ovary",
+    `Primary Site` == "skin" ~ "Skin",
+    `Primary Site` == "central_nervous_system" ~ "Central Nervous System",
+    `Primary Site` == "soft_tissue" ~ "Soft Tissue",
+    `Primary Site` == "stomach" ~ "Stomach",
+    `Primary Site` == "thyroid" ~ "Thyroid",
+    `Primary Site` == "lung" ~ "Lung")) %>%
+  ggplot() + aes(x = `Primary Site`, y = n, fill = Gender) + geom_col(position = position_dodge()) + theme(axis.text = element_text(angle = 90)) + theme(axis.text.x = element_text(size = 10)) + labs(title = "Top 10 Primary Sites rate based on Gender") + ylab("Frequency")
+
+  ggsave(here("output/primary_site_frequncy_per_gender.jpeg"), width = 25, height = 7)
+```
+
+*Primary Histologies Analysis*
+
+some genes have higher/ lower z_scores than others due to gene amplification, where the number of copies of a gene increases so more transcription templates are available (when a higher amount of the protein the gene codes is needed), downregulation, where certain genes are expressed less due to a response to an external stimulus, or activating mutation,  where proto oncogenes are activated. Gene over/underexpression (high/low z_scores) can cause cells to become cancerous, for example the underexpression of the TP53 and Trp53 genes , which encode the protein p53 , a crucial protein for tumour suppression. When the z_scores for the genes encoding this protein are low , they are underexpressed, meaning there is less p53 function than usual, which can cause unwanted proliferation of cells and cause cancer. The expression of the genes related to p53 is altered in almost all cancers, which is a clear indicator of how important it is in regulating the cell cycle. 
+
+
+```{r}
+#Top 4 primary histologies in 'samples' dataset
+
+samples %>% 
+  drop_na(`Primary Histology`) %>% 
+  count(`Primary Histology`) %>% 
+  arrange(desc(n)) %>% filter(n>540)
+
+samples %>% 
+  drop_na(`Primary Histology`) %>% 
+  count(`Primary Histology`) %>% 
+  arrange(desc(n)) %>% filter(n>540) %>%
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm")) %>%
+  ggplot() + aes(x = `Primary Histology`, y = n, fill = `Primary Histology`) + geom_col() + ylab("Frequency") + labs(title = "Frequency of Top 4 Primary Histologies")
+
+ggsave(here("output/samples_top_4_primary_histologies.jpeg"), width = 10, height = 7)
+
+#top4 and age descriptive
+top4_primary_histology <- samples %>% 
+	count(`Primary Histology`, sort = TRUE) %>% 
+	select(`Primary Histology`) %>% 
+	slice(1:4) %>% 
+	pull()
+
+samples %>% 
+	filter(`Primary Histology` %in% top4_primary_histology) %>% 
+	group_by(`Primary Histology`) %>%
+ get_summary_stats(Age, type = "common")
+
+#BOXPLOT FOR DESCRIPTIVE STATS
+samples %>% 
+	filter(`Primary Histology` %in% top4_primary_histology) %>% 
+	#group_by(`Primary Histology`) %>%
+ #get_summary_stats(Age, type = "common") %>% 
+   mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm")) %>%
+  ggplot() + aes(fill = `Primary Histology`, x = Age) + geom_boxplot(alpha = 0.5) + labs(title = "Boxplots showing descriptive statistics for the top 4 Primary Histologies")
+
+ggsave(here("output/boxplot_descriptive_stats_top_4_histologies.jpeg"), width = 10, height = 7)
+
+#gene_expression dataset filtered to give z_score values of between +50 and -50 only
+gene_expression %>% 
+  drop_na(`Z Score`) %>% 
+  arrange(desc(`Z Score`)) %>%
+  filter(`Z Score`<=50) %>% filter(`Z Score`>=-50) 
+ #why do some genes have high/low z scores, in what cancers are these genes over/under expressed?
+
+#count of overexpressed genes in gene_expression, between >2 (overexpressed) but only up to z scores of 50 (thought to be anomalies)
+gene_expression %>% 
+  drop_na(`Z Score`) %>% 
+  arrange((`Z Score`)) %>%
+  filter(`Z Score`<=50) %>% 
+  filter(`Z Score`>2) %>% count(`Gene Name`) %>% arrange(desc(n)) 
+
+
+#Because there was so many NAs in age, we are not working with the whole data set, so wont be 100% accurate
+
+#additional useful graphs 
+#density plot for the 4 histologys 
+samples %>% 
+	filter(`Primary Histology` %in% top4_primary_histology) %>% 
+	#group_by(`Primary Histology`) %>%
+ #get_summary_stats(Age, type = "common") %>% 
+   mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm")) %>%
+  ggplot() + aes(fill = `Primary Histology`, x = Age) + geom_density(alpha = 0.5) + labs(title = "Rate of Primary Histologies occurance over the age") + ylab("Density")
+
+ggsave(here("output/samples_density_rate_of_primary_histogogies_over_age.jpeg"), width = 10, height = 7)
+
+samples %>%
+  filter(`Primary Histology` %in% top4_primary_histology) %>%
+  mutate(Gender = case_when(
+    Gender == "f" ~ "Female",
+    Gender == "m" ~ "Male",
+    Gender == "u" ~ "Unknown")) %>%
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm")) %>% 
+  ggplot() + aes(fill = `Primary Histology`, x = Age) + geom_density(alpha = 0.5) + facet_wrap(~Gender) + ylab("Density") + labs(title = "Rate of occurances of Primary Histologies over the age") + labs(subtitle = "Seperated by gender")
+
+ggsave(here("output/samples_density_rate_of_ph_over_age_by_gender.jpeg"), width = 10, height = 7)
+
+samples %>%
+  filter(`Primary Histology` %in% top4_primary_histology) %>%
+  mutate(`Gender` = case_when(
+    `Gender` == "f" ~ "Female",
+    `Gender` == "m" ~ "Male" ,
+    `Gender` == "u" ~ "Unknown")) %>%
+  filter(Gender %in% c("Female", "Male")) %>%
+  mutate(`Primary Histology` = case_when(
+    `Primary Histology` == "carcinoma" ~ "Carcinoma",
+    `Primary Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Primary Histology` == "glioma" ~ "Glioma",
+    `Primary Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm")) %>%
+  ggplot() + aes(x = Age, fill = Gender) + geom_density(alpha = 0.5) + ylab("Density") + facet_wrap(~`Primary Histology`) + labs(title = "Rate of occurrence of Primary histologies over the age") + labs(subtitle = "Seperated by gender")
+
+ggsave(here("output/samples_density_ph_rate_across_age_by_gender_without_unknown.jpeg"), width = 10, height = 7)
+
+samples %>%
+  select(`Primary Histology`, Age, Gender) %>%
+  filter(`Primary Histology` %in% top4_primary_histology) %>% 
+  drop_na() %>%
+  arrange(Age) %>%
+  mutate(Gender = case_when(
+    Gender == "f" ~ "Female",
+    Gender == "m" ~ "Male",
+    Gender == "u" ~ "Unknown")) %>%
+  mutate_if(is.numeric, round) %>%
+  ggplot() + aes(x = Age, fill = Gender) + geom_density(alpha = 0.5) + ylab("Density") + labs(title = "Rate of Primary Histologies occurance over the age") + labs(subtitle = "Seperated by gender")
+
+ggsave(here("output/samples_density_overall_ph_by_gender.jpeg"), width = 10, height = 7)
+```
+> Why is there a larger proportion of females in the younger age group in the density graphs compared to the same age group of males?
+
+Around 1 tenth of new cancer cases are found in people ages 25-49 with females have nearly double the incidence rates than males. However, in the older age groups, men have a higher incidence of diagnosis than females of the same age. Higher rates in younger women is mainly due to an increase in adenocarcinoma in the lung. This is mainly due to people smoking, the total amount for both genders is reducing however, the male rate is dropping faster than the female rate, meaning younger women have a higher incidence rate than males.
+
+Cancer incidence by age. (2021). Retrieved 14 December 2021, from https://www.cancerresearchuk.org/health-professional/cancer-statistics/incidence/age
+
+Study: Young Women Now Have Higher Rates for Lung Cancer Than Men Worldwide. (2021). Retrieved 14 December 2021, from https://www.cancer.org/latest-news/study-young-women-now-have-higher-rate-for-lung-cancer-than-men-worldwide.html
+
+*Different Impacts as a proportion*
+
+```{r}
+impacts <- inner_join(hallmarks, mutation, by = "Gene Name") %>%
+  drop_na(Impact) %>%
+  count(Impact, sort = TRUE) %>%
+  mutate(props = prop.table(n))
+
+# First Chart 
+impacts %>%
+  ggplot() + aes(x = "", y = props, fill = Impact) + geom_col(colour = "black") +
+  coord_polar("y", start = 0) + 
+  geom_text(aes(label = paste0(round(props*100), "%")),
+            position = position_stack(vjust = 0.5))
+  
+blank_theme <- theme_minimal()+
+  theme(axis.title.x = element_blank(), axis.title.y = element_blank(), panel.border = element_blank(), panel.grid=element_blank(), 
+        axis.ticks = element_blank(), plot.title=element_text(size=14, face="bold")) 
+
+# Tidied up version
+inner_join(hallmarks, mutation, by = "Gene Name") %>%
+  mutate(Impact = case_when(
+    Impact == "promotes" ~ "promotes",
+    Impact == "fusion" ~ "promotes",
+    Impact == "suppresses" ~ "suppresses",
+    Impact == "oncogene" ~ "promotes",
+    Impact == "TSG" ~ "suppresses")) %>%
+  count(Impact) %>%
+  drop_na() %>%
+  mutate(props = prop.table(n)) %>%
+  select(Impact, n, props) %>%
+  ggplot() + aes(x = "", y = props, fill = Impact) + geom_col(colour = "black") + coord_polar("y", start = 0) + blank_theme +
+  theme(axis.text.x = element_blank()) + geom_text(aes(label = paste0(round(props*100), "%")), position = position_stack(vjust = 0.5)) +
+  labs(title = "Impacts of different Gene Mutations") + labs(subtitle = "as a proportion")
+
+ggsave(here("output/Gene_mutations_impact_col.jpeg"), width = 10, height = 7)
+
+# Pie Charts made using code from the following sources:  https://www.youtube.com/watch?v=bzRD_nvvIVI,   http://www.sthda.com/english/wiki/ggplot2-pie-chart-quick-start-guide-r-software-and-data-visualization#customized-pie-charts 
+
+inner_join(hallmarks, mutation, by = "Gene Name") %>%
+  mutate(Impact = case_when(
+    Impact == "promotes" ~ "promotes",
+    Impact == "fusion" ~ "promotes",
+    Impact == "suppresses" ~ "suppresses",
+    Impact == "oncogene" ~ "promotes",
+    Impact == "TSG" ~ "suppresses"
+  )) %>%
+  count(Impact) %>%
+  drop_na() %>%
+  mutate(props = prop.table(n)) %>%
+  select(Impact, n, props) %>%
+  ggplot() + aes(x = Impact, y = n, fill = Impact) + geom_col() + labs(title = "Frequency of different gene mutation impacts") + ylab("Frequency")
+
+ggsave(here("output/Gene_mutations_impacts_pie.jpeg"), width = 10, height = 7)
+
+impacts
+
+```
+
+*Gene and Mutations Count*
+
+```{r}
+inner_join(gene_expression, mutation, by = "Gene Name") %>%
+  select(`Gene Name`, `Z Score`, `Primary Site`, `Primary Histology`) %>%
+  distinct() %>%
+  filter(`Z Score` >0) %>%
+  arrange(`Z Score`)
+```
+
+```{r}
+gene_expression %>%
+  count(`Gene Name`)
+
+r_mutation %>%
+  count('Gene Name')
+
+mutation %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n))
+```
+
+
+*Drug Resistance Analysis*
+
+```{r}
+drugs <- inner_join(gene_expression, r_mutation, by = "Gene Name")
+drugs %>%
+  count(`Gene Name`) %>%
+  arrange(desc(n))
+
+drugs %>%
+  count(`Regulation`)
+
+drugs %>%
+  count(`Histology`) %>%
+  arrange(desc(n))
+
+drugs %>%
+  count(`Drug Name`) %>%
+  arrange(desc(n))
+
+drugs %>%
+  count(`Tier`)
+
+# All genes are census genes and classified as Tier 1.
+# The Drug Name is the name of the drug which the mutation confers resistance to.
+# AA Mutation is the mutation that occured in the Amino Acid sequence.
+# CDS Mutation is the mutation that occured in the nucleotide sequence. 
+
+# Histology count
+drugs %>%
+  filter(`Regulation` != "normal", `Gene Name` == "EGFR") %>%
+  count(Histology)
+
+# Drug name count
+drugs %>%
+  filter(`Regulation` != "normal", `Gene Name` == "EGFR") %>%
+  count(`Drug Name`) %>%
+  arrange(desc(n))
+
+vis_dat(drugs)
+
+
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`) %>%
+  mutate(`Histology` = case_when(
+    `Histology` == "carcinoma" ~ "Carcinoma",
+    `Histology` == "epithelioid_inflammatory_myofibroblastic_sarcoma" ~ "Epithelioid Inflammatory Myofibroblastic Sarcoma",
+    `Histology` == "gastrointestinal_stromal_tumour" ~ "Gastrointestinal Stromal Tumour",
+    `Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Histology` == "inflammatory_myofibroblastic_tumour" ~ "Inflammatory Myofibroblastic Tumour",
+    `Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm",
+    `Histology` == "malignant_melanoma" ~ "Malignant Melanoma",
+    `Histology` == "primitive_neuroectodermal_tumour-medulloblastoma" ~ "Primitive Neuroectodermal Tumour-Medulloblastoma",)) %>%
+  ggplot() + aes(x = `Histology`, y = `Drug Name`, colour = `Gene Name`) + geom_point() + theme(axis.text.x = element_text(size = 5, angle = 90)) 
+# Does this mean THAT histology is resistant to THOSE drugs, and THAT specific gene is showing resistance?
+# Yes, although further background reading/research is needed for that (pubmed id for drug name or gene name!) 
+
+#without facet wrap
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`) %>%
+  filter(`Regulation` != "normal", `Histology` != c("epithelioid_inflammatory_myofibroblastic_sarcoma", "inflammatory_myofibroblastic_tumour", "primitive_neuroectodermal_tumour-medulloblastoma")) %>%
+  mutate(`Histology` = case_when(
+    `Histology` == "carcinoma" ~ "Carcinoma",
+    `Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm"
+    )) %>%
+   ggplot() + aes(x = `Histology`, y = `Drug Name`, colour = `Gene Name`) + geom_point() + theme(axis.text.x = element_text(size = 8.5))
+
+#using facet wrap
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`) %>%
+  filter(`Regulation` != "normal", `Histology` != c("epithelioid_inflammatory_myofibroblastic_sarcoma", "inflammatory_myofibroblastic_tumour", "primitive_neuroectodermal_tumour-medulloblastoma")) %>%
+  mutate(`Primary Tissue` = case_when(
+    `Primary Tissue`== "breast" ~ "Breast",
+    `Primary Tissue`== "haematopoietic_and_lymphoid_tissue" ~ "Haematopoietic and Lymphoid Tissue",
+    `Primary Tissue`== "kidney" ~ "Kidney",
+    `Primary Tissue`== "lung" ~ "Lung",
+    `Primary Tissue` == "thyroid" ~ "Thyroid")) %>%
+  distinct() %>%
+  ggplot() + aes(x = `Histology`, y = `Drug Name`, colour = `Gene Name`) + geom_point() + theme(axis.text.x = element_text(size = 8.5, angle = 90)) + facet_wrap(~`Primary Tissue`)
+
+# Lung carcinoma seems to have multiple genes resistant to multiple drugs? whereas in all the other tissue types only one gene shows resistance mutation - why? 
+# Lung cancer is one of the most aggressive cancers - maybe that is because of this resistance? why is it so resistant though? what mutations occur in lung carcinoma and in which cell lines?
+
+drugs %>%
+  count(`Primary Tissue`) %>%
+  arrange(desc(n))
+
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`) %>%
+  filter(`Regulation` != "normal", `Histology` != c("epithelioid_inflammatory_myofibroblastic_sarcoma", "inflammatory_myofibroblastic_tumour", "primitive_neuroectodermal_tumour-medulloblastoma")) %>%
+  distinct() %>%
+  mutate(`Primary Tissue` = case_when(
+    `Primary Tissue`== "breast" ~ "Breast",
+    `Primary Tissue`== "haematopoietic_and_lymphoid_tissue" ~ "Haematopoietic and Lymphoid Tissue",
+    `Primary Tissue`== "kidney" ~ "Kidney",
+    `Primary Tissue`== "lung" ~ "Lung",
+    `Primary Tissue` == "thyroid" ~ "Thyroid")) %>%
+    mutate(`Histology` = case_when(
+    `Histology` == "carcinoma" ~ "Carcinoma",
+    `Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm")) %>%
+  ggplot() + aes(x = `Histology`, y = `Drug Name`, colour = `Primary Tissue`) + geom_point() + theme(axis.text.x = element_text(size = 8.5, angle = 90)) + facet_wrap(~`Gene Name`) + labs("Drug resistance in each primary tissue") + labs(subtitle = "Seperated by Histology and gene mutation")
+
+ggsave(here("output/drugs_resistance_by_gene_mutation_and_histology.jpeg"), width = 10, height = 7)
+```
+
+*Mutation analysis*
+
+```{r}
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung") %>%
+  distinct()
+
+# Drug count + regulation and gene name in 2 most common histology subtypes
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma")) %>%
+  distinct() %>%
+  count(`Drug Name`, `Regulation`, `Gene Name`) %>%
+  arrange(desc(n))
+
+# Aa Mutation count + gene name in 2 most common histology subtypes
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma")) %>%
+  distinct() %>%
+  count(`Aa Mutation`, `Gene Name`) %>%
+  arrange(desc(n))
+
+# Cds Mutation count + gene name in 2 most common histology subtypes
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma")) %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`) %>%
+  arrange(desc(n))
+```
+
+> Lung carcinoma
+
+```{r}
+# Histology Subtype 1 count
+b <- drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Histology Subtype 2`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung") %>%
+  mutate(`Histology Subtype 1` = case_when(
+    `Histology Subtype 1` == "acinar_adenocarcinoma" ~ "Acinar Adenocarcinoma",
+    `Histology Subtype 1` == "adenocarcinoma" ~ "Adenocarcinoma",
+    `Histology Subtype 1` == "bronchioloalveolar_adenocarcinoma" ~ "Bronchioloalveolar Adenocarcinoma",
+    `Histology Subtype 1` == "hepatoid_adenocarcinoma" ~ "Hepatoid Adenocarcinoma",
+    `Histology Subtype 1` == "micropapillary_adenocarcinoma" ~ "Micropapillary Adenocarcinoma",
+    `Histology Subtype 1` == "mixed_adenosquamous_carcinoma" ~ "Mixed Adenosquamous Carcinoma",
+    `Histology Subtype 1` == "non_small_cell_carcinoma" ~ "Non Small Cell Carcinoma",
+    `Histology Subtype 1` == "NS" ~ "NS",
+    `Histology Subtype 1` == "pleomorphic_carcinoma" ~ "Pleomorphic Carcinoma",
+    `Histology Subtype 1` == "sarcomatoid_carcinoma" ~ "Sarcomatoid Carcinoma",
+    `Histology Subtype 1` == "small_cell_carcinoma" ~ "Small Cell Carcinoma",
+    `Histology Subtype 1` == "squamous_cell_carcinoma" ~ "Squamous Cell Carcinoma")) %>%
+  distinct() %>%
+  count(`Histology Subtype 1`) %>%
+  arrange(desc(n))
+
+b
+
+b %>%
+  ggplot() + aes(x = `Histology Subtype 1`, y = n, fill = `Histology Subtype 1`) + geom_col() + labs(title = "Frequency of different gene mutation impacts") + ylab("Frequency") + theme(axis.text.x = element_text(size = 8.5, angle = 90))
+
+ggsave(here("output/Frequency_different_gene_mutation_impacts.jpeg"), width = 10, height = 7)
+
+
+#removing Histology subtype 2 column from the chunks after counting it as NS is the most common value
+
+# Gene count and regulation + 2 most common histology subtypes (that have n > 10, opposed to the rest of them...)
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma")) %>%
+  distinct() %>%
+  count(`Gene Name`, `Regulation`) %>%
+  arrange(desc(n))
+
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma")) %>%
+  distinct() %>%
+  count(`Gene Name`, `Regulation`) %>%
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = `Gene Name`, y = n, fill = `Gene Name`, fill = `Gene Name`) + geom_col() + ylab("Frequency") + labs(title = "Frequency of Gene Mutations Resulting in Lung Carcinoma") + theme(axis.text.x = element_text(size = 8.5, angle = 90)) 
+
+ggsave(here("output/lung_carcinoma_mutation_frequency.jpeg"), width = 10, height = 7)
+
+# 4 genes - EGFR, MET, MTOR, ROS1 -> all OVERexpressed apart from MTOR which is UNDERexpressed in adenocarcinoma and non small cell carcinoma
+
+
+# EGFR
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "EGFR") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`) %>%
+  arrange(desc(n))
+
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "EGFR") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`) %>%
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = `Cds Mutation`, y = n, fill = `Cds Mutation`) + geom_col() +  ylab("Frequency") + labs(title = "Frequency of different Cds Mutations") + labs(subtitle = "Gene: EGFR") + theme(axis.text.x = element_text(size = 8.5, angle = 90))
+
+ggsave(here("output/EGFR_Cds_mutations_frequency.jpeg"), width = 10, height = 7)
+
+# MET
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "MET") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`) %>%
+  arrange(desc(n))
+
+
+# MTOR
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "MTOR") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`) %>%
+  arrange(desc(n))
+
+
+# ROS1
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "ROS1") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`) %>%
+  arrange(desc(n))
+# Considerably low count for MTOR and ROS1 with Cds mutation unknown - can be excluded due to lack of data?
+```
+
+
+```{r}
+# Graph showing Drug resistance for each primary histology, separated by Gene mutation and tissue type
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`) %>%
+  filter(`Regulation` != "normal", `Histology` != c("epithelioid_inflammatory_myofibroblastic_sarcoma", "inflammatory_myofibroblastic_tumour", "primitive_neuroectodermal_tumour-medulloblastoma")) %>%
+  distinct() %>%
+  mutate(`Primary Tissue` = case_when(
+    `Primary Tissue`== "breast" ~ "Breast",
+    `Primary Tissue`== "haematopoietic_and_lymphoid_tissue" ~ "Haematopoietic and Lymphoid Tissue",
+    `Primary Tissue`== "kidney" ~ "Kidney",
+    `Primary Tissue`== "lung" ~ "Lung",
+    `Primary Tissue` == "thyroid" ~ "Thyroid")) %>%
+    mutate(`Histology` = case_when(
+    `Histology` == "carcinoma" ~ "Carcinoma",
+    `Histology` == "haematopoietic_neoplasm" ~ "Haematopoietic Neoplasm",
+    `Histology` == "lymphoid_neoplasm" ~ "Lymphoid Neoplasm")) %>%
+  ggplot() + aes(x = `Histology`, y = `Drug Name`, colour = `Primary Tissue`) + geom_point() + theme(axis.text.x = element_text(size = 8.5, angle = 90)) + facet_wrap(~`Gene Name`)
+
+ggsave(here("output/drug_resistance.jpeg"), width = 10, height = 7)
+
+# MAPPING GENES TO HALLMARKS
+celltypes <- inner_join(drugs, hallmarks, by = "Gene Name")
+
+# Focused on adenocarcinoma (n = 9416) and non_small_cell_carcinoma (n = 3234) as they are so much more common - other histologies have such low counts in comparison (>110) - effectively zero?
+celltypes %>%
+  select(`Primary Tissue`, `Regulation`, `Gene Name`, `Histology Subtype 1`) %>%
+  filter(`Regulation` != "normal" , `Gene Name` == "EGFR") %>%
+  count(`Histology Subtype 1`) %>%
+   mutate(`Histology Subtype 1` = case_when(
+    `Histology Subtype 1` == "acinar_adenocarcinoma" ~ "Acinar Adenocarcinoma",
+    `Histology Subtype 1` == "adenocarcinoma" ~ "Adenocarcinoma",
+    `Histology Subtype 1` == "bronchioloalveolar_adenocarcinoma" ~ "Bronchioloalveolar Adenocarcinoma",
+    `Histology Subtype 1` == "hepatoid_adenocarcinoma" ~ "Hepatoid Adenocarcinoma",
+    `Histology Subtype 1` == "micropapillary_adenocarcinoma" ~ "Micropapillary Adenocarcinoma",
+    `Histology Subtype 1` == "mixed_adenosquamous_carcinoma" ~ "Mixed Adenosquamous Carcinoma",
+    `Histology Subtype 1` == "non_small_cell_carcinoma" ~ "Non Small Cell Carcinoma",
+    `Histology Subtype 1` == "pleomorphic_carcinoma" ~ "Pleomorphic Carcinoma",
+    `Histology Subtype 1` == "small_cell_carcinoma" ~ "Small Cell Carcinoma",
+    `Histology Subtype 1` == "squamous_cell_carcinoma" ~ "Squamous Cell Carcinoma")) %>%
+  ggplot() + aes(x = `Histology Subtype 1`, y = n, fill = `Histology Subtype 1`) + geom_col() + theme(axis.text.x = element_text(size = 7.25, angle = 90)) + ylab("Frequency") + labs(title = "Frequency of Different Subtype 1 Histologies in EGFR mutations")
+
+ggsave(here("output/EGFR_different_sub_1_ph_frequencies.jpeg"), width = 10, height = 7)
+
+celltypes %>%
+  select(`Gene Name`, `Drug Name`, `Cell Type`, `Hallmark`, `Impact`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "EGFR") %>% 
+  count(Hallmark) %>%
+  arrange(desc(n))
+
+celltypes %>%
+  select(`Gene Name`, `Drug Name`, `Cell Type`, `Hallmark`, `Impact`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "EGFR") %>% 
+  count(Hallmark) %>%
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = `Hallmark`, y = n, fill = `Hallmark`) + geom_col() + theme(axis.text.x = element_text(size = 7.25, angle = 90)) + ylab("Frequency") + labs(title = "Frequency of Cancer Hallmarks for EGFR Mutations") +labs(subtitle = "Primary tissue: Lung")
+
+ggsave(here("output/EGFR_hallmarks_frequency_lung_primary_tissue.jpeg"), width = 10, height = 7)
+
+celltypes %>%
+  select(`Gene Name`, `Drug Name`, `Cell Type`, `Hallmark`, `Impact`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Genome Coordinates Gr Ch38`, `Pubmed Id`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "EGFR") %>% 
+  drop_na(`Genome Coordinates Gr Ch38`) %>%
+  count(Hallmark, `Genome Coordinates Gr Ch38`, Impact, `Pubmed Id`) %>%
+  arrange(desc(n)) 
+```
+
+```{r}
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma")) %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`, `Aa Mutation`, `Drug Name`) %>%
+  arrange(desc(n))
+
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Gene Name` == "EGFR", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma")) %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`, `Aa Mutation`, `Drug Name`) %>%
+  arrange(desc(n))
+
+# Focused on adenocarcinoma (n = 9416) and non_small_cell_carcinoma (n = 3234) as they are so much more common - other histologies have such low counts in comparison (>110) - effectively zero?
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Gene Name` == "EGFR", `Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Aa Mutation` == "p.T790M") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Gene Name`, `Aa Mutation`, `Drug Name`)
+
+# Aa Mutation Proportions
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Gene Name` == "EGFR", `Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Aa Mutation` == "p.T790M") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Aa Mutation`) %>%
+  mutate(props = prop.table(n))
+
+# Pie Charts made using code from the following sources:  https://www.youtube.com/watch?v=bzRD_nvvIVI,   http://www.sthda.com/english/wiki/ggplot2-pie-chart-quick-start-guide-r-software-and-data-visualization#customized-pie-charts 
+drugs %>%
+  select(`Gene Name`, `Drug Name`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Pubmed Id`, `Aa Mutation`, `Cds Mutation`) %>%
+  filter(`Gene Name` == "EGFR", `Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Aa Mutation` == "p.T790M") %>%
+  distinct() %>%
+  count(`Cds Mutation`, `Aa Mutation`) %>%
+  mutate(props = prop.table(n)) %>%
+  ggplot() + aes(x = "", y = props, fill = `Cds Mutation`) + geom_col(colour = "black") +
+  coord_polar("y", start = 0) + 
+   blank_theme +
+  theme(axis.text.x = element_blank()) +
+  geom_text(aes(label = paste0(round(props*100), "%")),
+            position = position_stack(vjust = 0.5)) +
+  labs(title = "Different Cds mutations resulting in p.T790m Transition") + labs(subtitle = " Gene: EGFR")
+
+ggsave(here("output/Cds_mutations_p.T790M_frequency.jpeg"), width = 10, height = 7)
+
+# p.T790M Resistant to Gefitinib, total n of 58 (c.? = 41, c.2369C>T = 17) - 1st
+# p.T790M Resistant to Erlotinib, total n of 27 (c.? = 18, c.2369C>T = 9) 2nd
+# p.T790M Resistant to TKI/NS, total n of 11 (c.? = 9, c.2369C>T = 2) 3rd
+# p.T790M Resistant to Afatinib, total n of 5 (c.? only) 4th
+# p.T790M Resistant to Osimertinib, total n of 1 (c.? only) Joint 5th
+# p.T790M Resistant to XL647, total n of 1 (c.? only) Joint 5th
+```
+
+> 790Aa in region coding for Protein Tyrosine Kinase
+
+Additionally, point mutation at exon 20; threonine to methionine transition (T790M) is strongly linked to acquired resistance especially against very commonly used EGFR inhibitors, namely, Afatinib, erlotinib and gefitinib (Gazdar, 2009)
+
+```{r}
+celltypes %>%
+  select(`Gene Name`, `Drug Name`, `Cell Type`, `Hallmark`, `Impact`, `Regulation`, `Primary Tissue`, `Histology`, `Histology Subtype 1`, `Genome Coordinates Gr Ch38`, `Pubmed Id`) %>%
+  filter(`Regulation` != "normal", `Primary Tissue` == "lung", `Histology Subtype 1` %in% c("adenocarcinoma", "non_small_cell_carcinoma"), `Gene Name` == "EGFR") %>% 
+  drop_na(`Genome Coordinates Gr Ch38`) %>%
+  count(Hallmark, `Genome Coordinates Gr Ch38`, Impact, `Pubmed Id`) %>%
+  arrange(desc(n)) %>%
+ ggplot() + aes(x = `Hallmark`, y = `n`, colour = `Genome Coordinates Gr Ch38`) + geom_point() + theme(axis.text.x = element_text(size = 3, angle = 90)) + ylab("Total Count") + labs("Genome Coordinates for each Mutation on the EGFR Gene and Their Respective Hallmarks")
+
+ggsave(here("output/EGFR_gene_mutation_coordinates_and_respective_hallmarks.jpeg"), width = 10, height = 7)
+```
+
+> EGFR Genome Coordinates
+
+The EGFR gene is located on the short arm of Chromosome 7, on band 7p11. The Gene is 244589 base pairs long and resides on the positive strand of DNA
+EGFR protein has 4 isoforms - result from alternate splicing
+   *increases number of possible different mutations?
+
+> Non-Small Cell Lung Cancer
+
+43-89% caused by EGFR overexpression
+cell proliferation, anti-apoptic signalling by constitutively activating the downstream signalling pathways(Bethune et al., 2010)
+Base insertions to exon 20 related to de novo resistance against EGFR inhibitors (Vyse and Huang, 2019).
+http://atlasgeneticsoncology.org/Genes/GC_EGFR.html
+https://pubmed.ncbi.nlm.nih.gov/22263017/ Bethune et al
+https://pubmed.ncbi.nlm.nih.gov/30854234/ Vyse and Huang
+https://pubmed.ncbi.nlm.nih.gov/19680293/ Gazdar 2009
+
