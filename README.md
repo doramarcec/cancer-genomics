@@ -4,7 +4,7 @@ This group assignment was a whole-term data analysis project analysing cancer ge
 
 The datasets that we analysed were: cancer samples, cancer hallmarks, cancer gene expression, cancer mutations and cancer resistance mutations.
 
-Different group members were more (or less) heavily involved in the analysis of different datasets, and in my case, I was primarily invovled in analysing gene expression, mutations and resistance mutations datasets. I will highlight my personal contributions to the project below, but the whole, finished project with everyone's contributions and notes can be accessed in the *Buck Compiled Code.Rmd* file. 
+Different group members were more (or less) heavily involved in the analysis of different datasets, and in my case, I was primarily involved in analysing gene expression, mutations and resistance mutations datasets. I will highlight some of my personal contributions to the project below, but the whole, finished project with everyone's contributions and notes can be accessed in the *Buck Compiled Code.Rmd* file. 
 
 ## Cancer gene expression and mutations
 I started by exploring the cancer gene expression datased and performing the regulation count, plotting the scatterplot demonstrating that over-expressed genes with highest z-scores are outliers in the data, and coding for the mean and SD of over-, under- and normally regulated genes (including the outliers).  
